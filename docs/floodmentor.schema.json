@@ -1,0 +1,463 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/floodmentor.schema.json",
+  "title": "FloodMentor Core Schemas",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "PolicyPackVersion": { "$ref": "#/$defs/PolicyPackVersion" },
+    "Inspection": { "$ref": "#/$defs/Inspection" },
+    "Observation": { "$ref": "#/$defs/Observation" },
+    "CorroborationEvidence": { "$ref": "#/$defs/CorroborationEvidence" },
+    "FloodEventAssessment": { "$ref": "#/$defs/FloodEventAssessment" },
+    "PolicyCitation": { "$ref": "#/$defs/PolicyCitation" },
+    "AgentVerification": { "$ref": "#/$defs/AgentVerification" },
+    "CoverageFinding": { "$ref": "#/$defs/CoverageFinding" },
+    "MediaAsset": { "$ref": "#/$defs/MediaAsset" }
+  },
+  "$defs": {
+    "UUID": {
+      "type": "string",
+      "format": "uuid"
+    },
+    "ISODateTime": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "Money": {
+      "type": "number",
+      "minimum": 0
+    },
+
+    "PolicyPackVersion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy_pack_id", "label", "released_at", "source_manifest_hash"],
+      "properties": {
+        "policy_pack_id": { "$ref": "#/$defs/UUID" },
+        "label": {
+          "type": "string",
+          "description": "Human-friendly version label (e.g., 'NFIP-Pack-2026.02.01')."
+        },
+        "released_at": { "$ref": "#/$defs/ISODateTime" },
+        "source_manifest_hash": {
+          "type": "string",
+          "description": "Hash of the source manifest for chain-of-custody and rollback validation."
+        },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "Inspection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["inspection_id", "created_at", "policy_pack_id", "claim_ref"],
+      "properties": {
+        "inspection_id": { "$ref": "#/$defs/UUID" },
+        "created_at": { "$ref": "#/$defs/ISODateTime" },
+        "policy_pack_id": { "$ref": "#/$defs/UUID" },
+        "claim_ref": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["claim_number"],
+          "properties": {
+            "claim_number": { "type": "string" },
+            "insured_name": { "type": "string" },
+            "loss_address": { "type": "string" },
+            "date_of_loss": { "type": "string", "format": "date" }
+          }
+        },
+        "geo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "lat": { "type": "number", "minimum": -90, "maximum": 90 },
+            "lng": { "type": "number", "minimum": -180, "maximum": 180 }
+          }
+        }
+      }
+    },
+
+    "Observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observation_id",
+        "inspection_id",
+        "created_at",
+        "raw_text",
+        "input_mode",
+        "context",
+        "extracted"
+      ],
+      "properties": {
+        "observation_id": { "$ref": "#/$defs/UUID" },
+        "inspection_id": { "$ref": "#/$defs/UUID" },
+        "created_at": { "$ref": "#/$defs/ISODateTime" },
+
+        "input_mode": {
+          "type": "string",
+          "enum": ["voice", "text"]
+        },
+        "raw_text": { "type": "string" },
+        "transcript_confidence": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Confidence score from speech-to-text if input_mode is voice."
+        },
+
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["area_type"],
+          "properties": {
+            "area_type": {
+              "type": "string",
+              "enum": ["interior", "exterior"]
+            },
+            "interior_level": {
+              "type": "string",
+              "enum": ["basement", "crawlspace", "first_floor", "second_floor", "upper_floor", "garage", "unknown"]
+            },
+            "exterior_orientation": {
+              "type": "string",
+              "enum": ["front", "back", "left", "right", "north", "south", "east", "west", "unknown"]
+            },
+            "room_or_zone": {
+              "type": "string",
+              "description": "Optional free-text zone label (e.g., 'utility room', 'mechanical closet')."
+            }
+          }
+        },
+
+        "extracted": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "flood_line": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["height_value", "height_unit", "evidence_type"],
+              "properties": {
+                "height_value": { "type": "number", "minimum": 0 },
+                "height_unit": { "type": "string", "enum": ["in", "ft", "cm", "m"] },
+                "evidence_type": { "type": "string", "enum": ["observed", "photo", "video", "unknown"] },
+                "notes": { "type": "string" }
+              }
+            },
+            "water_source_hint": {
+              "type": "string",
+              "enum": [
+                "rising_floodwater_outside_in",
+                "surface_water",
+                "overflow_inland_tidal",
+                "mudflow_as_defined",
+                "sewer_backup_flood_related",
+                "sewer_backup_non_flood",
+                "internal_plumbing_discharge",
+                "unknown"
+              ]
+            },
+            "mentioned_items": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Entities mentioned by user (e.g., 'water heater', 'panel', 'drywall')."
+            },
+            "media_asset_ids": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/UUID" }
+            }
+          }
+        }
+      }
+    },
+
+    "CorroborationEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "corroboration_id",
+        "inspection_id",
+        "created_at",
+        "evidence_category",
+        "relation_to_insured"
+      ],
+      "properties": {
+        "corroboration_id": { "$ref": "#/$defs/UUID" },
+        "inspection_id": { "$ref": "#/$defs/UUID" },
+        "created_at": { "$ref": "#/$defs/ISODateTime" },
+
+        "evidence_category": {
+          "type": "string",
+          "enum": ["neighbor_structure", "street_yard_inundation", "drainage_overflow", "terrain_indicator", "other"]
+        },
+        "relation_to_insured": {
+          "type": "string",
+          "enum": ["adjacent", "same_street", "same_block", "nearby", "unknown"]
+        },
+        "location_note": { "type": "string" },
+        "media_asset_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UUID" }
+        },
+        "notes": { "type": "string" }
+      }
+    },
+
+    "FloodEventAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "assessment_id",
+        "inspection_id",
+        "created_at",
+        "water_source",
+        "event_confidence",
+        "reasons",
+        "policy_pack_id"
+      ],
+      "properties": {
+        "assessment_id": { "$ref": "#/$defs/UUID" },
+        "inspection_id": { "$ref": "#/$defs/UUID" },
+        "created_at": { "$ref": "#/$defs/ISODateTime" },
+
+        "policy_pack_id": { "$ref": "#/$defs/UUID" },
+
+        "water_source": {
+          "type": "string",
+          "enum": [
+            "rising_floodwater_outside_in",
+            "surface_water",
+            "overflow_inland_tidal",
+            "mudflow_as_defined",
+            "sewer_backup_flood_related",
+            "sewer_backup_non_flood",
+            "internal_plumbing_discharge",
+            "unknown"
+          ]
+        },
+
+        "event_confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low", "indeterminate"]
+        },
+
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string" },
+          "description": "Plain-language reasons supporting the confidence score."
+        },
+
+        "supporting_observation_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UUID" }
+        },
+        "supporting_corroboration_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UUID" }
+        },
+
+        "definition_citations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PolicyCitation" },
+          "description": "Citations used to support flood definition/classification gating."
+        }
+      }
+    },
+
+    "PolicyCitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "document_title",
+        "document_effective_date",
+        "section_heading",
+        "page_number",
+        "excerpt"
+      ],
+      "properties": {
+        "document_title": { "type": "string" },
+        "document_effective_date": { "type": "string", "format": "date" },
+        "page_number": { "type": "integer", "minimum": 1 },
+        "section_heading": { "type": "string" },
+        "paragraph_ref": {
+          "type": "string",
+          "description": "Optional paragraph identifier if available (e.g., 'para 2', 'A(1)(b)')."
+        },
+        "excerpt": {
+          "type": "string",
+          "description": "Exact quoted text excerpt used to support the claim."
+        },
+        "source_url": { "type": "string", "format": "uri" },
+        "chunk_id": {
+          "type": "string",
+          "description": "Internal retrieval chunk id for traceability."
+        }
+      }
+    },
+
+    "AgentVerification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "verification_id",
+        "inspection_id",
+        "created_at",
+        "agent_a",
+        "agent_b",
+        "agent_c",
+        "final_status",
+        "final_confidence"
+      ],
+      "properties": {
+        "verification_id": { "$ref": "#/$defs/UUID" },
+        "inspection_id": { "$ref": "#/$defs/UUID" },
+        "created_at": { "$ref": "#/$defs/ISODateTime" },
+
+        "agent_a": { "$ref": "#/$defs/AgentRunResult" },
+        "agent_b": { "$ref": "#/$defs/AgentRunResult" },
+        "agent_c": { "$ref": "#/$defs/AgentRunResult" },
+
+        "final_status": {
+          "type": "string",
+          "enum": ["approved", "downgraded_needs_facts", "rejected_not_supported"]
+        },
+        "final_confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low", "none"]
+        },
+        "disagreement_notes": { "type": "string" }
+      }
+    },
+
+    "AgentRunResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_name", "status", "summary"],
+      "properties": {
+        "agent_name": { "type": "string" },
+        "status": {
+          "type": "string",
+          "enum": ["ok", "not_found", "needs_facts", "error"]
+        },
+        "summary": { "type": "string" },
+        "citations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PolicyCitation" }
+        },
+        "required_followups": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "CoverageFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "finding_id",
+        "inspection_id",
+        "created_at",
+        "question_or_prompt",
+        "decision_status",
+        "policy_pack_id"
+      ],
+      "properties": {
+        "finding_id": { "$ref": "#/$defs/UUID" },
+        "inspection_id": { "$ref": "#/$defs/UUID" },
+        "created_at": { "$ref": "#/$defs/ISODateTime" },
+
+        "policy_pack_id": { "$ref": "#/$defs/UUID" },
+
+        "question_or_prompt": { "type": "string" },
+
+        "decision_status": {
+          "type": "string",
+          "enum": ["covered", "covered_if_conditions_met", "not_determined_needs_facts", "not_found_in_policy_pack"]
+        },
+
+        "decision_summary": { "type": "string" },
+
+        "citations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PolicyCitation" }
+        },
+
+        "linked_observation_id": { "$ref": "#/$defs/UUID" },
+        "linked_media_asset_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/UUID" }
+        },
+
+        "agent_verification_id": { "$ref": "#/$defs/UUID" }
+      }
+    },
+
+    "MediaAsset": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["media_asset_id", "inspection_id", "created_at", "media_type"],
+      "properties": {
+        "media_asset_id": { "$ref": "#/$defs/UUID" },
+        "inspection_id": { "$ref": "#/$defs/UUID" },
+        "created_at": { "$ref": "#/$defs/ISODateTime" },
+
+        "media_type": { "type": "string", "enum": ["photo", "video", "audio"] },
+        "local_uri": { "type": "string" },
+        "cloud_uri": { "type": "string" },
+
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "area_type": { "type": "string", "enum": ["interior", "exterior"] },
+            "interior_level": {
+              "type": "string",
+              "enum": ["basement", "crawlspace", "first_floor", "second_floor", "upper_floor", "garage", "unknown"]
+            },
+            "exterior_orientation": {
+              "type": "string",
+              "enum": ["front", "back", "left", "right", "north", "south", "east", "west", "unknown"]
+            }
+          }
+        },
+
+        "annotations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/MediaAnnotation" }
+        }
+      }
+    },
+
+    "MediaAnnotation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["annotation_id", "type", "text"],
+      "properties": {
+        "annotation_id": { "$ref": "#/$defs/UUID" },
+        "type": { "type": "string", "enum": ["text_overlay", "callout", "tag"] },
+        "text": { "type": "string" },
+        "coverage_tag": {
+          "type": "string",
+          "enum": ["covered", "covered_if_conditions_met", "not_found_in_policy_pack", "not_determined_needs_facts"]
+        },
+        "citations": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/PolicyCitation" }
+        },
+        "position": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "x": { "type": "number", "minimum": 0, "maximum": 1 },
+            "y": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "description": "Normalized overlay position for UI rendering."
+        }
+      }
+    }
+  }
+}
