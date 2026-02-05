@@ -1,225 +1,333 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
+import { VoiceRecorder } from './components/VoiceRecorder'
+import { LocationSelector } from './components/LocationSelector'
+import { ExtractionCards } from './components/ExtractionCards'
+import { ObservationList } from './components/ObservationList'
+import { createObservation, listObservations } from './services/observationService'
+import { isDemoMode } from './lib/supabase'
+import type { Observation, ObservationContext, RecordingResult, ExtractedFacts } from './types'
 
-type DemoState = 'idle' | 'recording' | 'transcribing' | 'extracting' | 'complete'
+type AppState = 'location' | 'recording' | 'transcribing' | 'review' | 'saved'
 
-const DEMO_TRANSCRIPT = "Exterior front, flood line 22 inches on the brick, clear silt line and debris mat at the foundation."
+// Demo extraction - simulates AI extraction for demo mode
+function simulateExtraction(text: string): ExtractedFacts {
+  const facts: ExtractedFacts = {}
 
-const EXTRACTED_DATA = [
-  { label: 'Flood Line', value: '22 inches', icon: '📏' },
-  { label: 'Evidence', value: 'Silt line, debris mat', icon: '🔍' },
-  { label: 'Location', value: 'Exterior front', icon: '📍' },
-]
-
-function App() {
-  const [state, setState] = useState<DemoState>('idle')
-  const [displayedText, setDisplayedText] = useState('')
-  const [showCards, setShowCards] = useState<number[]>([])
-
-  const startDemo = async () => {
-    // Reset
-    setDisplayedText('')
-    setShowCards([])
-    setState('recording')
-
-    // Recording phase (3 seconds)
-    await sleep(3000)
-    setState('transcribing')
-
-    // Typing animation
-    for (let i = 0; i <= DEMO_TRANSCRIPT.length; i++) {
-      setDisplayedText(DEMO_TRANSCRIPT.slice(0, i))
-      await sleep(30)
+  // Look for flood line height
+  const heightMatch = text.match(/(\d+)\s*(inch|inches|in|feet|ft|"|')/i)
+  if (heightMatch) {
+    const value = parseInt(heightMatch[1], 10)
+    const unit = heightMatch[2].toLowerCase()
+    facts.floodLine = {
+      heightValue: value,
+      heightUnit: unit.includes('f') || unit === "'" ? 'ft' : 'in',
+      evidenceType: 'observed',
     }
-
-    await sleep(500)
-    setState('extracting')
-
-    // Show cards one by one
-    for (let i = 0; i < EXTRACTED_DATA.length; i++) {
-      await sleep(400)
-      setShowCards(prev => [...prev, i])
-    }
-
-    await sleep(500)
-    setState('complete')
   }
 
-  const reset = () => {
-    setState('idle')
-    setDisplayedText('')
-    setShowCards([])
+  // Look for water source hints
+  if (text.toLowerCase().includes('silt') || text.toLowerCase().includes('debris')) {
+    facts.waterSourceHint = 'rising_floodwater_outside_in'
+  }
+
+  // Extract mentioned items
+  const items: string[] = []
+  const itemKeywords = ['drywall', 'baseboard', 'foundation', 'brick', 'wall', 'floor', 'ceiling']
+  itemKeywords.forEach(keyword => {
+    if (text.toLowerCase().includes(keyword)) {
+      items.push(keyword)
+    }
+  })
+  if (items.length > 0) {
+    facts.mentionedItems = items
+  }
+
+  return facts
+}
+
+function App() {
+  const [appState, setAppState] = useState<AppState>('location')
+  const [locationContext, setLocationContext] = useState<Partial<ObservationContext>>({})
+  const [transcript, setTranscript] = useState('')
+  const [audioBlob, setAudioBlob] = useState<Blob | null>(null)
+  const [extractedFacts, setExtractedFacts] = useState<ExtractedFacts | null>(null)
+  const [observations, setObservations] = useState<Observation[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [isExtracting, setIsExtracting] = useState(false)
+
+  // Load existing observations on mount
+  useEffect(() => {
+    listObservations().then(setObservations).catch(console.error)
+  }, [])
+
+  const handleLocationComplete = (context: ObservationContext) => {
+    setLocationContext(context)
+    setAppState('recording')
+  }
+
+  const handleRecordingComplete = async (result: RecordingResult) => {
+    setAudioBlob(result.blob)
+    setAppState('transcribing')
+    setError(null)
+
+    // In demo mode, simulate transcription
+    // In production, this would call Whisper API
+    setTimeout(() => {
+      // Demo transcript based on location
+      const demoTranscripts: Record<string, string> = {
+        interior: "First floor living room, flood line at 22 inches on the drywall, clear silt line and water damage visible on baseboards.",
+        exterior: "Exterior front, flood line 18 inches on the brick foundation, debris mat and silt line visible at ground level.",
+      }
+
+      const text = demoTranscripts[locationContext.areaType || 'interior'] ||
+        "Flood line observed at approximately 20 inches, water damage evident."
+
+      setTranscript(text)
+      setAppState('review')
+
+      // Simulate extraction
+      setIsExtracting(true)
+      setTimeout(() => {
+        const facts = simulateExtraction(text)
+        setExtractedFacts(facts)
+        setIsExtracting(false)
+      }, 1500)
+    }, 2000)
+  }
+
+  const handleSave = async () => {
+    if (!transcript || !locationContext.areaType) return
+
+    setError(null)
+
+    try {
+      await createObservation({
+        rawText: transcript,
+        inputMode: 'voice',
+        audioBlob: audioBlob || undefined,
+        context: locationContext as ObservationContext,
+      })
+
+      // Refresh observations list
+      const updated = await listObservations()
+      setObservations(updated)
+
+      setAppState('saved')
+
+      // Reset after delay
+      setTimeout(() => {
+        resetFlow()
+      }, 2000)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to save observation')
+    }
+  }
+
+  const resetFlow = () => {
+    setAppState('location')
+    setLocationContext({})
+    setTranscript('')
+    setAudioBlob(null)
+    setExtractedFacts(null)
+    setError(null)
+    setIsExtracting(false)
   }
 
   return (
     <div className="min-h-screen bg-gray-100 flex flex-col">
       {/* Header */}
-      <header className="bg-brand-blue text-white px-4 py-4 shadow-lg">
-        <h1 className="text-xl font-bold">FloodMentor</h1>
-        <p className="text-blue-200 text-sm">Voice-first flood documentation</p>
+      <header className="bg-brand-blue text-white px-4 py-4 shadow-lg safe-area-top">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold">FloodMentor</h1>
+            <p className="text-blue-200 text-sm">
+              {isDemoMode ? 'Demo Mode' : 'Voice-first documentation'}
+            </p>
+          </div>
+          {appState !== 'location' && appState !== 'saved' && (
+            <button
+              onClick={resetFlow}
+              className="text-blue-200 text-sm px-3 py-1 rounded-lg bg-blue-700/50"
+            >
+              Cancel
+            </button>
+          )}
+        </div>
       </header>
 
       {/* Main content */}
-      <main className="flex-1 flex flex-col items-center justify-center p-6">
+      <main className="flex-1 overflow-auto px-4 py-6 safe-area-bottom">
+        {/* Error display */}
+        {error && (
+          <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl mb-4">
+            {error}
+          </div>
+        )}
+
         <AnimatePresence mode="wait">
-          {/* Idle / Recording state - show record button */}
-          {(state === 'idle' || state === 'recording') && (
+          {/* Step 1: Location selection */}
+          {appState === 'location' && (
             <motion.div
-              key="recorder"
-              initial={{ opacity: 0, scale: 0.9 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9 }}
-              className="flex flex-col items-center gap-6"
+              key="location"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
             >
-              {/* Waveform visualization */}
-              {state === 'recording' && <Waveform />}
+              <LocationSelector
+                value={locationContext}
+                onChange={setLocationContext}
+                onComplete={handleLocationComplete}
+              />
 
-              {/* Record button */}
-              <button
-                onClick={state === 'idle' ? startDemo : undefined}
-                disabled={state === 'recording'}
-                className={`w-24 h-24 rounded-full flex items-center justify-center transition-all shadow-lg ${
-                  state === 'recording'
-                    ? 'bg-red-500 animate-pulse'
-                    : 'bg-red-500 hover:bg-red-600 hover:scale-105'
-                }`}
-              >
-                {state === 'recording' ? (
-                  <div className="w-8 h-8 bg-white rounded" />
-                ) : (
-                  <div className="w-0 h-0 border-l-[20px] border-l-white border-y-[12px] border-y-transparent ml-2" />
-                )}
-              </button>
-
-              <p className="text-gray-500 text-center">
-                {state === 'idle' ? 'Tap to record observation' : 'Recording...'}
-              </p>
+              {/* Show recent observations */}
+              {observations.length > 0 && (
+                <div className="mt-8">
+                  <ObservationList observations={observations} />
+                </div>
+              )}
             </motion.div>
           )}
 
-          {/* Transcribing state */}
-          {(state === 'transcribing' || state === 'extracting' || state === 'complete') && (
+          {/* Step 2: Recording */}
+          {appState === 'recording' && (
             <motion.div
-              key="results"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="w-full max-w-md space-y-4"
+              key="recording"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
             >
+              {/* Location badge */}
+              <div className="flex justify-center mb-4">
+                <span className="bg-white px-3 py-1 rounded-full text-sm text-gray-600 shadow-sm">
+                  📍 {formatLocationBadge(locationContext)}
+                </span>
+              </div>
+
+              <VoiceRecorder onRecordingComplete={handleRecordingComplete} />
+            </motion.div>
+          )}
+
+          {/* Step 3: Transcribing */}
+          {appState === 'transcribing' && (
+            <motion.div
+              key="transcribing"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex flex-col items-center justify-center py-16 gap-4"
+            >
+              <div className="animate-spin rounded-full h-12 w-12 border-4 border-brand-blue border-t-transparent" />
+              <p className="text-gray-600 text-lg">Transcribing...</p>
+            </motion.div>
+          )}
+
+          {/* Step 4: Review */}
+          {appState === 'review' && (
+            <motion.div
+              key="review"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-4"
+            >
+              {/* Location badge */}
+              <div className="flex justify-center">
+                <span className="bg-white px-3 py-1 rounded-full text-sm text-gray-600 shadow-sm">
+                  📍 {formatLocationBadge(locationContext)}
+                </span>
+              </div>
+
               {/* Transcript */}
               <div className="bg-white rounded-xl p-4 shadow-md">
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">
+                  <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full font-medium">
                     Transcript
                   </span>
-                  {state === 'transcribing' && (
-                    <span className="text-xs text-gray-400 animate-pulse">typing...</span>
-                  )}
                 </div>
-                <p className="text-gray-800 leading-relaxed">
-                  {displayedText}
-                  {state === 'transcribing' && (
-                    <span className="inline-block w-0.5 h-5 bg-brand-blue ml-1 animate-pulse" />
-                  )}
-                </p>
+                <textarea
+                  value={transcript}
+                  onChange={(e) => setTranscript(e.target.value)}
+                  className="w-full text-gray-800 leading-relaxed resize-none border-0 focus:ring-0 p-0 min-h-[100px]"
+                  placeholder="Transcript will appear here..."
+                />
               </div>
 
-              {/* Extraction cards */}
-              {(state === 'extracting' || state === 'complete') && (
-                <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                      Extracted Facts
-                    </span>
-                    {state === 'extracting' && showCards.length < EXTRACTED_DATA.length && (
-                      <span className="text-xs text-gray-400 animate-pulse">extracting...</span>
-                    )}
-                  </div>
+              {/* Extracted facts */}
+              <ExtractionCards facts={extractedFacts} isExtracting={isExtracting} />
 
-                  {EXTRACTED_DATA.map((item, index) => (
-                    <AnimatePresence key={item.label}>
-                      {showCards.includes(index) && (
-                        <motion.div
-                          initial={{ opacity: 0, x: -20, scale: 0.95 }}
-                          animate={{ opacity: 1, x: 0, scale: 1 }}
-                          transition={{ type: 'spring', damping: 15 }}
-                          className="bg-white rounded-xl p-4 shadow-md border-l-4 border-brand-blue flex items-center gap-3"
-                        >
-                          <span className="text-2xl">{item.icon}</span>
-                          <div className="flex-1">
-                            <p className="text-xs text-gray-500 uppercase tracking-wide">{item.label}</p>
-                            <p className="text-gray-800 font-semibold">{item.value}</p>
-                          </div>
-                          <motion.div
-                            initial={{ scale: 0 }}
-                            animate={{ scale: 1 }}
-                            transition={{ delay: 0.2 }}
-                            className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center"
-                          >
-                            <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                            </svg>
-                          </motion.div>
-                        </motion.div>
-                      )}
-                    </AnimatePresence>
-                  ))}
-                </div>
-              )}
-
-              {/* Complete state - show reset */}
-              {state === 'complete' && (
-                <motion.div
-                  initial={{ opacity: 0 }}
-                  animate={{ opacity: 1 }}
-                  transition={{ delay: 0.5 }}
-                  className="flex flex-col items-center gap-4 pt-4"
+              {/* Actions */}
+              <div className="flex gap-3 pt-4">
+                <button
+                  onClick={handleSave}
+                  disabled={isExtracting}
+                  className="flex-1 bg-brand-blue text-white py-4 rounded-xl font-semibold
+                             disabled:opacity-50 disabled:cursor-not-allowed
+                             active:bg-blue-700 touch-manipulation"
                 >
-                  <p className="text-green-600 font-semibold">Observation saved!</p>
-                  <button
-                    onClick={reset}
-                    className="bg-brand-blue text-white px-6 py-3 rounded-xl font-semibold hover:bg-blue-700 transition-colors"
-                  >
-                    Record Another
-                  </button>
-                </motion.div>
-              )}
+                  Save Observation
+                </button>
+                <button
+                  onClick={resetFlow}
+                  className="px-6 bg-gray-200 text-gray-700 py-4 rounded-xl font-medium
+                             active:bg-gray-300 touch-manipulation"
+                >
+                  Discard
+                </button>
+              </div>
+            </motion.div>
+          )}
+
+          {/* Step 5: Saved confirmation */}
+          {appState === 'saved' && (
+            <motion.div
+              key="saved"
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              className="flex flex-col items-center justify-center py-16 gap-4"
+            >
+              <motion.div
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                transition={{ type: 'spring', damping: 10 }}
+                className="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center"
+              >
+                <svg className="w-10 h-10 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              </motion.div>
+              <p className="text-xl font-semibold text-gray-800">Observation Saved!</p>
+              <p className="text-gray-500">Ready for the next one</p>
             </motion.div>
           )}
         </AnimatePresence>
       </main>
 
-      {/* Footer hint */}
-      <footer className="text-center text-gray-400 text-xs py-4">
-        Demo Mode - UI Preview
+      {/* Footer - safe area for mobile */}
+      <footer className="text-center text-gray-400 text-xs py-2 safe-area-bottom">
+        {isDemoMode && 'Demo Mode - Data stored locally'}
       </footer>
     </div>
   )
 }
 
-function Waveform() {
-  return (
-    <div className="flex items-center justify-center gap-1 h-16">
-      {[...Array(12)].map((_, i) => (
-        <motion.div
-          key={i}
-          className="w-1.5 bg-red-400 rounded-full"
-          animate={{
-            height: [16, Math.random() * 40 + 20, 16],
-          }}
-          transition={{
-            duration: 0.5,
-            repeat: Infinity,
-            delay: i * 0.05,
-            ease: 'easeInOut',
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms))
+function formatLocationBadge(context: Partial<ObservationContext>): string {
+  if (context.areaType === 'interior' && context.interiorLevel) {
+    const labels: Record<string, string> = {
+      basement: 'Basement',
+      first_floor: '1st Floor',
+      second_floor: '2nd Floor',
+      upper_floor: 'Upper Floor',
+      garage: 'Garage',
+      crawlspace: 'Crawlspace',
+    }
+    return `Interior - ${labels[context.interiorLevel] || context.interiorLevel}`
+  }
+  if (context.areaType === 'exterior' && context.exteriorOrientation) {
+    return `Exterior - ${context.exteriorOrientation.charAt(0).toUpperCase() + context.exteriorOrientation.slice(1)}`
+  }
+  return context.areaType || 'Unknown'
 }
 
 export default App
