@@ -34,5 +34,10 @@ coverage/
 *.tmp
 *.temp
 
+# TypeScript build info
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+
 # Claude Code local settings
 .claude/
